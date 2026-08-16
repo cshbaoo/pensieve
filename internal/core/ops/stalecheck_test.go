@@ -112,6 +112,84 @@ func TestStaleSuspectsProjectFilter(t *testing.T) {
 	}
 }
 
+// 行级复核:锚点带行号时,文件被别处改动不应误报;锚点行自己被动过才报。
+func TestStaleSuspectsLineLevelRehearing(t *testing.T) {
+	dir := t.TempDir()
+	store := memory.NewStore(dir)
+	created := time.Now().Add(-48 * time.Hour) // 记忆创建于两天前
+	mk := func(id, anchor string) {
+		m := &memory.Memory{
+			ID: id, Type: "gotcha", Title: id, Project: "acme/demo",
+			Status: "active", Confidence: "human", Source: "test", Sensitivity: "normal",
+			Created: created, Body: "b",
+			Anchors: []memory.Anchor{{Kind: "code", Target: anchor}},
+		}
+		if err := store.Write(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("mem_line", "main.go:2") // 带行号
+	mk("mem_file", "main.go")   // 文件级
+
+	repo := t.TempDir()
+	runGit := func(env []string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+	}
+	commit := func(msg string, when time.Time) {
+		base := created.Add(-48 * time.Hour).Format(time.RFC3339)
+		ts := base
+		if !when.IsZero() {
+			ts = when.Format(time.RFC3339)
+		}
+		runGit(nil, "add", ".")
+		runGit([]string{"GIT_AUTHOR_DATE=" + ts, "GIT_COMMITTER_DATE=" + ts},
+			"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", msg)
+	}
+
+	runGit(nil, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("l1\nl2\nl3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit("baseline", time.Time{}) // 基线提交落在记忆创建之前
+
+	ctx := t.Context()
+	// 基线:无任何后续改动 → 无嫌疑
+	if sus, err := StaleSuspects(ctx, store, repo, "acme/demo"); err != nil || len(sus) != 0 {
+		t.Fatalf("基线应无嫌疑: sus=%v err=%v", sus, err)
+	}
+
+	// 只改第 3 行:行级锚点不应误报,文件级锚点维持老行为(报)
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("l1\nl2\nl3c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit("touch line3", time.Now())
+	sus, err := StaleSuspects(ctx, store, repo, "acme/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sus) != 1 || sus[0].MemID != "mem_file" {
+		t.Fatalf("改动未触及第 2 行时,应只报文件级锚点: %+v", sus)
+	}
+
+	// 改第 2 行:行级锚点也该报
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("l1\nl2c\nl3c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit("touch line2", time.Now())
+	sus, err = StaleSuspects(ctx, store, repo, "acme/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sus) != 2 {
+		t.Fatalf("锚点行被改动后应两条都报: %+v", sus)
+	}
+}
+
 func TestLooksLikePath(t *testing.T) {
 	yes := []string{"internal/foo/bar.go", "README.md", `cmd\stale.go`, "a/b/c"}
 	no := []string{"EnsureLocalGitignore", "DoSomething", "", "golang"}

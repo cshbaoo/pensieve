@@ -38,12 +38,18 @@ func DecisionReviewDue(store *memory.Store, now time.Time) []*memory.Memory {
 
 // stripAnchorLine 去掉锚点里的行号后缀(path/to.go:525 → path/to.go)
 func stripAnchorLine(target string) string {
+	p, _ := splitAnchorLine(target)
+	return p
+}
+
+// splitAnchorLine 拆锚点为 路径+行号(path/to.go:525 → ("path/to.go", 525));无行号返回 0
+func splitAnchorLine(target string) (string, int) {
 	if i := strings.LastIndex(target, ":"); i > 0 {
-		if _, err := strconv.Atoi(target[i+1:]); err == nil {
-			return target[:i]
+		if n, err := strconv.Atoi(target[i+1:]); err == nil {
+			return target[:i], n
 		}
 	}
-	return target
+	return target, 0
 }
 
 // codeRootOf 从工作目录推导代码仓库根(非 git 仓库返回空,静默跳过巡检)
@@ -80,6 +86,7 @@ func StaleSuspects(ctx context.Context, store *memory.Store, codeRoot, project s
 	type ref struct {
 		m      *memory.Memory
 		anchor string
+		line   int // 0 = 锚点未带行号
 	}
 	var refs []ref
 	var mems []*memory.Memory
@@ -97,7 +104,7 @@ func StaleSuspects(ctx context.Context, store *memory.Store, codeRoot, project s
 			if a.Kind != "code" {
 				continue
 			}
-			p := stripAnchorLine(a.Target)
+			p, ln := splitAnchorLine(a.Target)
 			if p == "" || !looksLikePath(p) {
 				continue
 			}
@@ -105,7 +112,7 @@ func StaleSuspects(ctx context.Context, store *memory.Store, codeRoot, project s
 				seenAnchor[p] = true
 				anchorPaths = append(anchorPaths, p)
 			}
-			refs = append(refs, ref{m, p})
+			refs = append(refs, ref{m, p, ln})
 			hasCodeAnchor = true
 		}
 		if hasCodeAnchor {
@@ -135,6 +142,8 @@ func StaleSuspects(ctx context.Context, store *memory.Store, codeRoot, project s
 	// 判定:文件不存在 → 锚点失活;文件最后提交晚于记忆创建 → 疑似漂移。
 	// 「有改动」设同日宽限:与记忆创建同一天的改动常见(写完记忆顺手再改代码),不算漂移信号;
 	// 跨自然日的改动才是"结论建立在外部世界已变的前提上"。
+	// 行级复核:锚点带行号时再做一道 git log -L——文件被别处改动但锚点行没动,不算漂移;
+	// 成本可控:仅对初判嫌疑的锚点各调一次 git。
 	var out []StaleSuspect
 	missing := map[string]bool{}
 	changedReason := map[string]string{}
@@ -154,11 +163,33 @@ func StaleSuspects(ctx context.Context, store *memory.Store, codeRoot, project s
 			out = append(out, StaleSuspect{MemID: r.m.ID, Title: r.m.Title, Anchor: r.anchor, Reason: "锚点文件已不存在"})
 			reported[r.m.ID] = true
 		} else if day, ok := changedReason[r.anchor]; ok && day > r.m.Created.Format("2006-01-02") {
+			if r.line > 0 && !lineChangedAfter(ctx, codeRoot, r.anchor, r.line, r.m.Created.Format("2006-01-02")) {
+				continue
+			}
 			out = append(out, StaleSuspect{MemID: r.m.ID, Title: r.m.Title, Anchor: r.anchor, Reason: fmt.Sprintf("锚点文件在 %s 又有改动", day)})
 			reported[r.m.ID] = true
 		}
 	}
 	return out, nil
+}
+
+// lineChangedAfter 行级复核:锚点行(path:line)在记忆创建日(含宽限日)之后是否被提交改动过。
+// git log -L 会跟随该行随历史移动;失败时保守返回 true(维持文件级嫌疑,防止漏报)。
+func lineChangedAfter(ctx context.Context, repoRoot, path string, line int, createdDay string) bool {
+	c2, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(c2, "git", "-C", repoRoot, "log", "--no-merges",
+		"--format=@%ct", "-L", fmt.Sprintf("%d,%d:%s", line, line, path)).CombinedOutput()
+	if err != nil {
+		return true
+	}
+	for _, l := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "@") {
+			ts, _ := strconv.ParseInt(strings.TrimSpace(l)[1:], 10, 64)
+			return time.Unix(ts, 0).Format("2006-01-02") > createdDay // git log 倒序,首个即最新
+		}
+	}
+	return false // 该行无历史提交记录(或从未存在),不报漂移
 }
 
 // StaleSuspectsFromCwd 便捷入口:从工作目录推导代码仓库根与项目名再巡检。
