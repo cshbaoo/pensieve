@@ -63,7 +63,8 @@ func RenderSection(mems []*memory.Memory) string {
 	sb.WriteString("## 工程记忆(Pensieve)\n\n")
 	sb.WriteString("本项目使用 Pensieve 管理工程记忆(踩坑/决策/接口细节)。工作纪律:\n")
 	sb.WriteString("- 开始排查问题前,先检索记忆:memory_search \"<问题关键词>\"\n")
-	sb.WriteString("- 解决问题/做完决策后,沉淀为记忆:memory_save(先出草稿给用户确认)\n\n")
+	sb.WriteString("- 解决问题/做完决策/发现 API 坑后,主动提议沉淀为记忆:memory_save(先出草稿给用户确认)\n")
+	sb.WriteString("- 不要等用户开口:每完成一个 bug 修复、重要决策或可复用的接口细节,当场提议保存(宁多提一次,不可错过)\n\n")
 	sb.WriteString("## 高频坑(gotcha)\n\n")
 	if len(mems) == 0 {
 		sb.WriteString("暂无高频坑记录;随记忆沉淀自动更新。\n")
