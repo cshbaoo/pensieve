@@ -196,3 +196,32 @@ func (s *Store) FreshnessNotice(m *Memory) string {
 	}
 	return FreshnessBanner(m, succTitle, succCreated)
 }
+
+// NormalizeProject 收敛不带 owner 前缀的项目名(如 LLM 按目录名猜测传入的 "brainpp"):
+// 若事实源中恰有一个 owner/repo 形式的项目的 repo 部分与之相同,重写为完整名,
+// 防止同一项目被记成两个命名空间。global/local 原样放行;无匹配或多义时原样返回。
+func (s *Store) NormalizeProject(p string) string {
+	if p == "" || p == "global" || p == "local" || strings.Contains(p, "/") {
+		return p
+	}
+	owner := ""
+	seen := map[string]bool{}
+	_ = s.Walk(func(m *Memory) error {
+		if seen[m.Project] {
+			return nil
+		}
+		seen[m.Project] = true
+		if i := strings.LastIndex(m.Project, "/"); i >= 0 && m.Project[i+1:] == p {
+			if owner == "" {
+				owner = m.Project[:i]
+			} else if owner != m.Project[:i] {
+				owner = "*" // 多 owner 命中同名 repo,歧义,不强猜
+			}
+		}
+		return nil
+	})
+	if owner == "" || owner == "*" {
+		return p
+	}
+	return owner + "/" + p
+}

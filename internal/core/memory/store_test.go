@@ -166,6 +166,45 @@ func TestLocalOnlyIsolation(t *testing.T) {
 	}
 }
 
+// 短项目名归一到唯一 owner/repo 全名,防止命名空间分裂(brainpp → basemind/brainpp)
+func TestNormalizeProject(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	m1 := sampleMemory() // myteam/my-api
+	m2 := sampleMemory()
+	m2.ID = "mem_20260813_ef01"
+	m2.Project = "basemind/brainpp"
+	for _, m := range []*Memory{m1, m2} {
+		if err := s.Write(m); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	cases := map[string]string{
+		"brainpp":       "basemind/brainpp",
+		"my-api":        "myteam/my-api",
+		"global":        "global",
+		"local":         "local",
+		"basemind/x":    "basemind/x", // 已有完整 owner 前缀,不动
+		"newrepo":       "newrepo",    // 无匹配,原样返回(允许新建项目)
+		"":              "",
+	}
+	for in, want := range cases {
+		if got := s.NormalizeProject(in); got != want {
+			t.Fatalf("NormalizeProject(%q)=%q want %q", in, got, want)
+		}
+	}
+	// 歧义:两个 owner 都有同名 repo 时原样返回
+	m3 := sampleMemory()
+	m3.ID = "mem_20260813_ef02"
+	m3.Project = "otherteam/my-api"
+	if err := s.Write(m3); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := s.NormalizeProject("my-api"); got != "my-api" {
+		t.Fatalf("歧义场景不应强猜: got %q", got)
+	}
+}
+
 func TestNewIDFormatAndUnique(t *testing.T) {
 	now := time.Now()
 	a := NewID("标题", now)

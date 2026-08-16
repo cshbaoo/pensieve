@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -179,7 +180,7 @@ func (s *Server) handleSave(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		Title:       title,
 		Body:        content,
 		Type:        req.GetString("type", "pattern"),
-		Project:     req.GetString("project", "global"),
+		Project:     s.saveProject(req.GetString("project", "")),
 		Tags:        strSliceArg(req, "tags"),
 		Entities:    strSliceArg(req, "entities"),
 		Status:      "active",
@@ -274,7 +275,7 @@ func (s *Server) handleExtractDraft(ctx context.Context, req mcp.CallToolRequest
 		Title:       draft.Title,
 		Body:        draft.Body,
 		Type:        draft.Type,
-		Project:     req.GetString("project", "global"),
+		Project:     s.saveProject(req.GetString("project", "")),
 		Tags:        draft.Tags,
 		Entities:    draft.Entities,
 		Status:      "active",
@@ -392,7 +393,7 @@ func (s *Server) handleContext(ctx context.Context, req mcp.CallToolRequest) (*m
 	}
 	store := memory.NewStore(s.cfg.Core.RepoDir)
 	var all []memBrief
-	_ = store.Walk(func(m *memory.Memory) error {
+	walkErr := store.Walk(func(m *memory.Memory) error {
 		if m.Project != project || m.Status != "active" {
 			return nil
 		}
@@ -401,6 +402,9 @@ func (s *Server) handleContext(ctx context.Context, req mcp.CallToolRequest) (*m
 	})
 	if len(all) == 0 {
 		stats.Track(s.cfg.Core.IndexDir, "context", "mcp", project, nil)
+		if walkErr != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("项目 %s 暂无记忆;另外记忆仓库遍历出错(可能有损坏的记忆文件):%v——建议运行 pensieve doctor 核查。", project, walkErr)), nil
+		}
 		return mcp.NewToolResultText(fmt.Sprintf("项目 %s 暂无记忆。", project)), nil
 	}
 
@@ -443,21 +447,35 @@ func (s *Server) handleContext(ctx context.Context, req mcp.CallToolRequest) (*m
 	if overdue := ops.DecisionReviewDue(store, time.Now()); len(overdue) > 0 {
 		fmt.Fprintf(&sb, "\n⏳ 待复核:%d 条 decision 已过复核期(review_at 到期),用 update --review-at 顺延或 --status stale 标记。", len(overdue))
 	}
+	// 遍历出错不静默:坏文件会让简报"悄悄少记忆",必须显性提示
+	if walkErr != nil {
+		fmt.Fprintf(&sb, "\n\n⚠ 记忆仓库遍历出错(可能有损坏的记忆文件),本简报不完整:%v——建议运行 pensieve doctor 核查。", walkErr)
+	}
 	stats.Track(s.cfg.Core.IndexDir, "context", "mcp", project, map[string]any{"memories": len(all)})
 	return mcp.NewToolResultText(sb.String()), nil
 }
 
 // ---------- helpers ----------
 
-// resolveProject 缺省时回落到从工作目录检测到的项目
+// resolveProject 缺省时回落到从工作目录检测到的项目;并把 LLM 传入的短项目名归一到 owner/repo 全名,
+// 防止同一项目分裂成两个命名空间(如 brainpp vs basemind/brainpp)。
 func (s *Server) resolveProject(v string) string {
-	if v != "" {
-		return v
+	if v == "" {
+		v = s.defaultProject
 	}
-	return s.defaultProject
+	return memory.NewStore(s.cfg.Core.RepoDir).NormalizeProject(v)
 }
 
-// detectProject 从 MCP 进程工作目录的 git remote 推导项目名 owner/repo
+// saveProject 处理写入侧 project 参数:global 兜底 + 短名归一(同 resolveProject 的归一规则)
+func (s *Server) saveProject(v string) string {
+	if v == "" {
+		v = "global"
+	}
+	return memory.NewStore(s.cfg.Core.RepoDir).NormalizeProject(v)
+}
+
+// detectProject 从 MCP 进程工作目录的 git remote 推导项目名 owner/repo;
+// 无 remote(如本子库/新仓库)时回落到工作区目录名,此后由 resolveProject/saveProject 归一。
 func detectProject() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -465,7 +483,7 @@ func detectProject() string {
 	}
 	out, err := exec.Command("git", "-C", wd, "remote", "get-url", "origin").CombinedOutput()
 	if err != nil {
-		return ""
+		return filepath.Base(wd)
 	}
 	u := strings.TrimSpace(string(out))
 	u = strings.TrimSuffix(strings.TrimSuffix(u, ".git"), "/")
