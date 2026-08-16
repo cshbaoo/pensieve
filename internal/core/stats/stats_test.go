@@ -54,3 +54,33 @@ func TestTrackNoIndexDir(t *testing.T) {
 		t.Fatal("不应创建文件")
 	}
 }
+
+func TestReportRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	Track(dir, "search", "cli", "myteam/my-api", map[string]any{"hits": 3.0})
+	Track(dir, "save", "mcp", "myteam/my-api", map[string]any{"id": "mem_a", "type": "gotcha"})
+
+	r, err := ExportReport(dir)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if r.Version != 1 || len(r.Events) != 2 || r.ExportedAt == 0 {
+		t.Fatalf("report 元信息: %+v", r)
+	}
+
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := SaveReport(r, path); err != nil {
+		t.Fatalf("save report: %v", err)
+	}
+	loaded, err := LoadReportFile(path)
+	if err != nil {
+		t.Fatalf("load report: %v", err)
+	}
+	if len(loaded.Events) != 2 || loaded.Exporter != r.Exporter {
+		t.Fatalf("round trip 不一致: %+v", loaded)
+	}
+
+	if _, err := LoadReportFile(filepath.Join(t.TempDir(), "not-exist.json")); err == nil {
+		t.Fatal("读取不存在文件应报错")
+	}
+}

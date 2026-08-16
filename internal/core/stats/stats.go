@@ -3,7 +3,9 @@ package stats
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sync"
 	"time"
@@ -72,6 +74,59 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
+}
+
+// Report 用于导出的报表：元信息 + 全部事件。
+// Detail 侧约定只放计数类字段(hits/id/type——见各调用点),不含搜索词与记忆正文,
+// 因此导出文件可以放心传给他人;发送前提示用户自行检查。
+type Report struct {
+	Version    int     `json:"version"`
+	ExportedAt int64   `json:"exported_at"`
+	Exporter   string  `json:"exporter"`
+	Hostname   string  `json:"hostname,omitempty"`
+	Events     []Event `json:"events"`
+}
+
+// ExportReport 把本地全部事件打包为可导出的报表
+func ExportReport(indexDir string) (*Report, error) {
+	events, err := LoadAll(indexDir)
+	if err != nil {
+		return nil, err
+	}
+	exporter := ""
+	if u, err := user.Current(); err == nil {
+		exporter = u.Username
+	}
+	host, _ := os.Hostname()
+	return &Report{
+		Version:    1,
+		ExportedAt: time.Now().Unix(),
+		Exporter:   exporter,
+		Hostname:   host,
+		Events:     events,
+	}, nil
+}
+
+// SaveReport 写出报表 JSON（缩进格式,便于人工检查）
+func SaveReport(r *Report, path string) error {
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// LoadReportFile 读取别人导出的报表文件
+func LoadReportFile(path string) (*Report, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var r Report
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("不是有效的 stats 导出文件(%s): %w", path, err)
+	}
+	return &r, nil
 }
 
 // Summary 聚合统计
