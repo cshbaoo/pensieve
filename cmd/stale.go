@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -19,12 +20,13 @@ var staleMark bool
 
 var staleCmd = &cobra.Command{
 	Use:   "stale",
-	Short: "巡检代码锚点失活的记忆(文件被删或在你记忆后有大改动)",
-	Long: `巡检记忆库中 active 记忆的 code 锚点:
-  - 锚点文件已不存在       → 强烈建议标 stale
-  - 锚点文件在记忆创建后又有改动 → 建议复核结论是否仍然成立
-本命令只产出嫌疑列表,不自动改任何状态;确认后用 update --status stale 落状态,
-或用 --mark 一键批量标记。`,
+	Short: "巡检失活记忆:代码锚点漂移 + 决策复核期到期",
+	Long: `巡检记忆库中 active 记忆的两类"过期信号":
+  - code 锚点:文件被删,或记忆创建后跨自然日又有改动
+  - decision 复核期:写入时设定的 review_at 到期,前提可能已变化
+本命令只产出嫌疑列表,不自动改任何状态;确认后:
+  update --status stale / stale --mark(锚点浮出)    # 落状态
+  update --review-at <期限> (决策复核完仍成立时顺延)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		cwd, err := os.Getwd()
@@ -36,8 +38,19 @@ var staleCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		overdue := ops.DecisionReviewDue(store, time.Now())
+		if len(overdue) > 0 {
+			fmt.Printf("⚠ %d 条决策已过复核期(记忆时设定的 review_at 到期):\n\n", len(overdue))
+			for _, m := range overdue {
+				fmt.Printf("- %s (%s)\n  复核期: %s — 前提可能已变化,请重读决策是否仍然成立\n", m.Title, m.ID, m.ReviewAt.Format("2006-01-02"))
+			}
+			fmt.Println("\n仍然成立 → pensieve update <id> --review-at <新期限>\n已经过时 → pensieve update <id> --status stale(或写新结论并 supersede)")
+		}
 		if len(suspects) == 0 {
-			fmt.Println("✔ 无锚点失活嫌疑(或当前目录不在 git 仓库/无活跃 code 锚点记忆)")
+			if len(overdue) > 0 {
+				return nil
+			}
+			fmt.Println("✔ 无锚点失活嫌疑(或当前目录不在 git 仓库/无活跃 code 锚点记忆),无决策超期")
 			return nil
 		}
 		fmt.Printf("发现 %d 条锚点疑似失活的记忆:\n\n", len(suspects))

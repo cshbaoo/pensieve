@@ -106,6 +106,18 @@ var doctorCmd = &cobra.Command{
 				return fmt.Sprintf("%d 条嫌疑(见下),复核后 pensieve stale --mark 或 update --status stale", len(suspects)),
 					fmt.Errorf("锚点失活嫌疑 %d 条:\n%s", len(suspects), sb.String())
 			}},
+			{"决策复核到期", func(ctx context.Context) (string, error) {
+				overdue := ops.DecisionReviewDue(memory.NewStore(cfg.Core.RepoDir), time.Now())
+				if len(overdue) == 0 {
+					return "无超期决策", nil
+				}
+				var sb strings.Builder
+				for _, m := range overdue {
+					fmt.Fprintf(&sb, "  %s (%s, 复核期 %s)\n", m.Title, m.ID, m.ReviewAt.Format("2006-01-02"))
+				}
+				// 提示级:决策超期不是健康失败,只提醒复核,doctor 整体仍判绿
+				return fmt.Sprintf("⚠ %d 条超期决复核(提示级,非失败):\n%s  update <id> --review-at 顺延 / --status stale 过期", len(overdue), sb.String()), nil
+			}},
 			{"记忆巡检", func(ctx context.Context) (string, error) {
 				// ECC 借鉴的 doctor 思路:坏链 + 重复 ID 扫一遍
 				store := memory.NewStore(cfg.Core.RepoDir)

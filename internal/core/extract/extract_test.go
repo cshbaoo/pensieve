@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cshbaoo/pensieve/internal/llm"
@@ -52,6 +53,19 @@ func TestExtractSkip(t *testing.T) {
 	_, skip, err := Extract(context.Background(), c, "m", "今天中午吃了面")
 	if err != nil || !skip {
 		t.Fatalf("skip: %v %v", skip, err)
+	}
+}
+
+// 类型化提炼模板:提示词必须携带每种类型专属的 body 骨架(typeProfiles),
+// 保证 LLM 能按"api 三段式/bugfix 因果链/decision 背景-代价"等不同结构组织记忆
+func TestTypeProfilesPresent(t *testing.T) {
+	for _, want := range []string{"api:", "bugfix:", "gotcha:", "decision:", "snippet:", "pattern:", "requirement:", "topic:"} {
+		if !strings.Contains(typeProfiles, want) {
+			t.Errorf("typeProfiles 缺 %s 骨架", want)
+		}
+	}
+	if !strings.Contains(codingPrompt, typeProfiles) {
+		t.Fatal("codingPrompt 未注入类型骨架")
 	}
 }
 

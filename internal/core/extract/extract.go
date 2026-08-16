@@ -12,13 +12,13 @@ import (
 
 // Draft LLM 提炼出的记忆草稿
 type Draft struct {
-	Title    string   `json:"title"`
-	Type     string   `json:"type"`
-	Tags     []string `json:"tags"`
-	Entities []string `json:"entities"`
-	Anchors  []string `json:"anchors"`
+	Title    string    `json:"title"`
+	Type     string    `json:"type"`
+	Tags     []string  `json:"tags"`
+	Entities []string  `json:"entities"`
+	Anchors  []string  `json:"anchors"`
 	Links    []DrfLink `json:"links"`
-	Body     string   `json:"body"`
+	Body     string    `json:"body"`
 }
 
 // DrfLink 提炼草稿中的关联链接
@@ -27,7 +27,20 @@ type DrfLink struct {
 	Rel string `json:"rel,omitempty"`
 }
 
-// coding pack 的提炼提示词（未来迁移到 packs/coding/extract.prompt）
+// coding pack 的提炼提示词(未来迁移到 packs/coding/extract.prompt)
+// typeProfiles:每种类型的 body 骨架——类型策略表第一块(检索权重/保鲜策略随后)
+// 设计意图:同一份存储,不同的"形态要求",让每种知识以最适合被复用的结构入库。
+const typeProfiles = `各类型 body 骨架(选定 type 后按对应结构组织 body,缺失维度就省略,不造内容):
+- api:        定位(文件/接口在哪) → 行为与参数(含单位/边界值) → 注意点与坑
+- bugfix:     症状(用户侧的报错/现象) → 根因(因果链,不许直接跳结论) → 修法 → 防复发做法
+- gotcha:     坑是什么(一句话场景) → 为什么容易被踩(认知差在哪) → 正确姿势
+- decision:   背景与约束 → 决策内容 → 推论与代价(为什么不是别的选项)
+- snippet:    使用条件(何时该用它) → 代码块(完整可粘贴) → 常见误用
+- pattern:    约定内容 → 适用场景 → 反例(什么时候不该这么做)
+- requirement: 目标(一句话) → 验收标准(可验证) → 范围外(明确不做什么)
+- topic:      卷宗范围说明 + 收录标准(什么记忆该进本卷宗)
+`
+
 const codingPrompt = `你是编程团队的知识管理员。从下面提供的会话/文本内容中，提取最值得长期保留的工程经验（最多 1 条，宁缺毋滥）。
 
 只允许这些类型:
@@ -39,6 +52,8 @@ const codingPrompt = `你是编程团队的知识管理员。从下面提供的�
 - pattern: 项目约定/模式/协作纪律
 - snippet: 可复用代码片段
 - topic: 汇总多条已有记忆的"卷宗/索引页"(输入若是在整理归类多条已知记忆时使用)
+
+` + typeProfiles + `
 
 links 字段: 若该记忆与其他记忆有明确关联,输出带 rel 的对象,
 rel 取值为: contains(卷宗收编子记忆) / implements(实现/落地某需求或方案) /

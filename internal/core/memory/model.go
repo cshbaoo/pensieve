@@ -125,6 +125,9 @@ type Memory struct {
 	Votes       int       `yaml:"votes"`
 	Sensitivity string    `yaml:"sensitivity"`
 	Created     time.Time `yaml:"created"`
+	// ReviewAt 复核期(仅 decision 默认自动设置):超期后由 stale/doctor/简报浮出人工复核。
+	// 决策是最爱过期的类型——当前提变化时结论自动失效,这条时间戳是"活文档"的保险丝。
+	ReviewAt time.Time `yaml:"review_at,omitempty"`
 
 	Body string `yaml:"-"` // frontmatter 之后的 Markdown 正文
 
@@ -136,4 +139,21 @@ type Memory struct {
 func NewID(title string, t time.Time) string {
 	h := md5.Sum([]byte(fmt.Sprintf("%s|%d", title, t.UnixNano())))
 	return fmt.Sprintf("mem_%s_%s", t.Format("20060102"), hex.EncodeToString(h[:])[:4])
+}
+
+// DefaultDecisionReview 决策记忆的默认复核周期。决策是最爱过期的类型:
+// 前提变化时结论自动失效,60 天是"战略级决策通常仍存活"的经验值。
+const DefaultDecisionReview = 60 * 24 * time.Hour
+
+// ApplyReviewPolicy 写入前的复核期策略:decision 类型缺省自动补 review_at。
+// 其他类型不自动设(review 语义只对决策成立;gotcha/api 的失活由锚点巡检承担)。
+func ApplyReviewPolicy(m *Memory) {
+	if m.Type == "decision" && m.ReviewAt.IsZero() && !m.Created.IsZero() {
+		m.ReviewAt = m.Created.Add(DefaultDecisionReview)
+	}
+}
+
+// OverdueForReview 该记忆当前是否已过复核期(仅检查 active;超期由巡检浮出,不自动降权)
+func (m *Memory) OverdueForReview(now time.Time) bool {
+	return !m.ReviewAt.IsZero() && m.Status == "active" && now.After(m.ReviewAt)
 }

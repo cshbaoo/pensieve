@@ -38,16 +38,18 @@ func toolSave() mcp.Tool {
 		mcp.WithBoolean("force", mcp.Description("查重命中后仍强制并存(默认拦截)")),
 		mcp.WithArray("supersedes", mcp.Description("本条记忆取代的旧记忆 id 列表;落盘时自动将旧记忆标记为 superseded(confirmed=true 时生效)"), mcp.Items(map[string]any{"type": "string"})),
 		mcp.WithString("sensitivity", mcp.Description("normal|local-only(敏感记忆:仅本机不推远程)")),
+		mcp.WithString("review_at", mcp.Description("复核期 RFC3339(可选);decision 类型缺省自动设为创建后 60 天")),
 	)
 }
 
 func toolUpdate() mcp.Tool {
 	return mcp.NewTool("memory_update",
-		mcp.WithDescription("更新已有记忆:改状态、标记被取代、点赞。"),
+		mcp.WithDescription("更新已有记忆:改状态、标记被取代、点赞、顺延复核期。"),
 		mcp.WithString("id", mcp.Required(), mcp.Description("记忆 id")),
 		mcp.WithString("status", mcp.Description("active|stale|superseded|archived")),
 		mcp.WithString("supersede_by", mcp.Description("取代它的新记忆 id(同时置状态 superseded)")),
 		mcp.WithBoolean("vote", mcp.Description("true=给这条记忆 +1 票")),
+		mcp.WithString("review_at", mcp.Description("重设复核期(RFC3339);复核确认无误后顺延")),
 	)
 }
 

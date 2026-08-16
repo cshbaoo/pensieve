@@ -194,6 +194,15 @@ func (s *Server) handleSave(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	for _, lk := range linkArgs(req, "links") {
 		m.Links = append(m.Links, lk)
 	}
+	// 复核期决策:显式 review_at 优先;decision 缺省自动补 60 天
+	if ra := req.GetString("review_at", ""); ra != "" {
+		t, err := time.Parse(time.RFC3339, ra)
+		if err != nil {
+			return mcp.NewToolResultError("review_at 需 RFC3339 格式: " + err.Error()), nil
+		}
+		m.ReviewAt = t
+	}
+	memory.ApplyReviewPolicy(m)
 	m.ID = memory.NewID(title, m.Created)
 
 	if !req.GetBool("confirmed", false) {
@@ -282,6 +291,7 @@ func (s *Server) handleExtractDraft(ctx context.Context, req mcp.CallToolRequest
 			m.Links = append(m.Links, memory.Link{ID: lk.ID, Rel: lk.Rel})
 		}
 	}
+	memory.ApplyReviewPolicy(m)
 	m.ID = memory.NewID(m.Title, m.Created)
 
 	// 提炼产出的结构化字段(tags/entities/anchors 由 LLM 重组,raw 扫描覆盖不到新词)再扫一遍
@@ -346,6 +356,13 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	if req.GetBool("vote", false) {
 		m.Votes++
+	}
+	if ra := req.GetString("review_at", ""); ra != "" {
+		t, err := time.Parse(time.RFC3339, ra)
+		if err != nil {
+			return mcp.NewToolResultError("review_at 需 RFC3339 格式: " + err.Error()), nil
+		}
+		m.ReviewAt = t
 	}
 	if err := store.Write(m); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -421,6 +438,10 @@ func (s *Server) handleContext(ctx context.Context, req mcp.CallToolRequest) (*m
 		if suspects, err := ops.StaleSuspectsFromCwd(ctx, store, wd); err == nil && len(suspects) > 0 {
 			fmt.Fprintf(&sb, "\n\n⏳ 待复核:%d 条记忆的代码锚点疑似失活(锚点文件被删或在其后有改动)。请运行 pensieve stale 查看详情并确认是否标记 stale。", len(suspects))
 		}
+	}
+	// 决策复核超期提示:decision 是唯一自带保鲜期的类型
+	if overdue := ops.DecisionReviewDue(store, time.Now()); len(overdue) > 0 {
+		fmt.Fprintf(&sb, "\n⏳ 待复核:%d 条 decision 已过复核期(review_at 到期),用 update --review-at 顺延或 --status stale 标记。", len(overdue))
 	}
 	stats.Track(s.cfg.Core.IndexDir, "context", "mcp", project, map[string]any{"memories": len(all)})
 	return mcp.NewToolResultText(sb.String()), nil

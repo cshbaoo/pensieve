@@ -23,6 +23,19 @@ type StaleSuspect struct {
 
 const staleScanMaxAnchors = 200 // 扫描预算上限(ECC 借鉴):防巨型库把 context/doctor 拖慢
 
+// DecisionReviewDue 返回已过复核期(review_at < now)且仍 active 的决策类记忆。
+// 决策的前提会变,超期≠失效——只浮出人工复核,red line 一致:不落状态由人拍板。
+func DecisionReviewDue(store *memory.Store, now time.Time) []*memory.Memory {
+	var out []*memory.Memory
+	_ = store.Walk(func(m *memory.Memory) error {
+		if m.OverdueForReview(now) {
+			out = append(out, m)
+		}
+		return nil
+	})
+	return out
+}
+
 // stripAnchorLine 去掉锚点里的行号后缀(path/to.go:525 → path/to.go)
 func stripAnchorLine(target string) string {
 	if i := strings.LastIndex(target, ":"); i > 0 {

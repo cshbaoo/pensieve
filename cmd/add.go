@@ -33,6 +33,7 @@ var (
 	addBodyFile   string
 	addLocalOnly  bool
 	addSupersedes []string
+	addReviewAt   string
 )
 
 var addCmd = &cobra.Command{
@@ -130,6 +131,15 @@ var addCmd = &cobra.Command{
 		if m.Title == "" {
 			return fmt.Errorf("标题不能为空")
 		}
+		// 决策类型:补默认复核期(--review-at 可覆盖),GET 巡检据此浮出超期决策
+		if addReviewAt != "" {
+			t, err := time.Parse(time.RFC3339, addReviewAt)
+			if err != nil {
+				return fmt.Errorf("--review-at 需 RFC3339(如 2026-10-15T00:00:00+08:00): %w", err)
+			}
+			m.ReviewAt = t
+		}
+		memory.ApplyReviewPolicy(m)
 		m.ID = memory.NewID(m.Title, m.Created)
 
 		// 查重
@@ -248,4 +258,5 @@ func init() {
 	addCmd.Flags().StringVar(&addBodyFile, "body-file", "", "从文件读取正文(避免长文本暴露在进程列表)")
 	addCmd.Flags().BoolVar(&addLocalOnly, "local-only", false, "敏感记忆:仅本机,永不推送远程")
 	addCmd.Flags().StringSliceVar(&addSupersedes, "supersedes", nil, "本条记忆取代的旧记忆 id(逗号分隔);写入后自动将其标记为 superseded")
+	addCmd.Flags().StringVar(&addReviewAt, "review-at", "", "复核期(RFC3339);decision 类型缺省自动设为 60 天后")
 }

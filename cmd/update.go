@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +17,7 @@ var (
 	updStatus      string
 	updSupersedeBy string
 	updVote        bool
+	updReviewAt    string
 )
 
 var updateCmd = &cobra.Command{
@@ -38,6 +40,13 @@ var updateCmd = &cobra.Command{
 		}
 		if updVote {
 			m.Votes++
+		}
+		if updReviewAt != "" {
+			t, err := time.Parse(time.RFC3339, updReviewAt)
+			if err != nil {
+				return fmt.Errorf("--review-at 需 RFC3339: %w", err)
+			}
+			m.ReviewAt = t
 		}
 		if err := store.Write(m); err != nil {
 			return err
@@ -68,5 +77,6 @@ func init() {
 	updateCmd.Flags().StringVar(&updStatus, "status", "", "active|stale|superseded|archived")
 	updateCmd.Flags().StringVar(&updSupersedeBy, "by", "", "取代它的新记忆 id")
 	updateCmd.Flags().BoolVar(&updVote, "vote", false, "给这条记忆 +1 票")
+	updateCmd.Flags().StringVar(&updReviewAt, "review-at", "", "重设复核期(RFC3339);复核确认无误后顺延用")
 	rootCmd.AddCommand(updateCmd)
 }
