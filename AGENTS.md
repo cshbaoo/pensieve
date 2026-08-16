@@ -9,6 +9,7 @@
 
 ## 高频坑(gotcha)
 
+- gotcha:改完 export 托管区模板必须重启 MCP 会话——旧 pensieve.exe 进程会在写记忆后把 AGENTS.md 打回旧模板
 - gotcha:冲突带对长文档内嵌断言失明+锚点巡检误报治理(跨项目/符号名/同日宽限)
 - gotcha:local-only 守卫混入记忆 commit,undo 误删守卫却留记忆——守卫必须单独 commit
 <!-- pensieve:end -->
