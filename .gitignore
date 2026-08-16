@@ -1,0 +1,11 @@
+pensieve.exe
+/pensieve
+
+
+# 产品战略/PRD 不进去库(全文在工程记忆里)
+docs/product-strategy*.md
+docs/product-plan*.md
+docs/design.md
+pensieve.exe~
+dist/
+spike.exe
